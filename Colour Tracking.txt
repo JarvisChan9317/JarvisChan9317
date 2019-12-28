@@ -1,0 +1,202 @@
+# import the necessary packages
+from collections import deque
+from imutils.video import VideoStream
+import numpy as np
+import argparse
+import cv2
+import imutils
+import time
+
+# construct the argument parse and parse the arguments
+ap = argparse.ArgumentParser()
+ap.add_argument("-v", "--video",
+                help="path to the (optional) video file")
+ap.add_argument("-b", "--buffer", type=int, default=100000,
+                help="max buffer size")
+args = vars(ap.parse_args())
+
+# define the lower and upper boundaries of the "green"
+# ball in the HSV color space, then initialize the
+# list of tracked points
+greenLower = (75, 0, 47)
+greenUpper = (135, 255, 255)
+redLower = (48, 88, 130)
+redUpper = (0, 0, 0)
+
+pts1 = None  # for frame 3
+pts2 = None  # fOr frame 4
+pts_volatile1 = deque(maxlen=100)  # for frame 1
+pts_volatile2 = deque(maxlen=100)  # for frame 2
+
+# if a video path was not supplied, grab the reference
+# to the webcam
+if not args.get("video", False):
+    vs = VideoStream(src=0).start()
+
+# otherwise, grab a reference to the video file
+else:
+    vs = cv2.VideoCapture(args["video"])
+
+# allow the camera or video file to warm up
+time.sleep(2.0)
+start_time = time.time()
+
+frame3 = cv2.imread("Court Vector-01.jpg")
+frame4 = cv2.imread("Court Vector-01.jpg")
+
+frame3 = imutils.resize(frame3, width=720)
+frame4 = imutils.resize(frame4, width=720)
+
+# keep looping
+while True:
+    frame_startTime = time.time()
+    # grab the current frame
+    frame1 = vs.read()
+    # handle the frame from VideoCapture or VideoStream
+    frame1 = frame1[1] if args.get("video", False) else frame1
+    # if we are viewing a video and we did not grab a frame,
+    # then we have reached the end of the video
+    if frame1 is None:
+        break
+    frame2 = cv2.imread("Mapping Black-01.jpg")
+
+    # resize the frame, blur it, and convert it to the HSV
+    # color space
+    frame1 = imutils.resize(frame1, width=720)
+    frame2 = imutils.resize(frame2, width=720)
+
+    blurred = cv2.GaussianBlur(frame1, (11, 11), 0)
+    hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
+
+    # construct a mask for the color "green", then perform
+    # a series of dilations and erosions to remove any small
+    # blobs left in the mask
+    mask = cv2.inRange(hsv, greenLower, greenUpper)
+    mask = cv2.erode(mask, None, iterations=2)
+    mask = cv2.dilate(mask, None, iterations=2)
+    mask2 = cv2.inRange(hsv, redLower, redUpper)
+    mask2 = cv2.erode(mask2, None, iterations=2)
+    mask2 = cv2.dilate(mask2, None, iterations=2)
+
+    # find contours in the mask and initialize the current
+    # (x, y) center of the ball
+    cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL,
+                            cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+    center = None
+    cnts2 = cv2.findContours(mask2.copy(), cv2.RETR_EXTERNAL,
+                             cv2.CHAIN_APPROX_SIMPLE)
+    cnts2 = imutils.grab_contours(cnts2)
+    center2 = None
+
+    # only proceed if at least one contour was found
+    if len(cnts) > 0:
+        # find the largest contour in the mask, then use
+        # it to compute the minimum enclosing circle and
+        # centroid
+        c = max(cnts, key=cv2.contourArea)
+        ((x, y), radius) = cv2.minEnclosingCircle(c)
+        M = cv2.moments(c)
+        center = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+        elapsed_time = time.time() - start_time
+        print((x, y))
+        print('2nd value: ' + "%.2f" % elapsed_time)
+
+        # only proceed if the radius meets a minimum size
+        if radius > 10:
+            # draw the circle and centroid on the frame,
+            # then update the list of tracked points
+            cv2.circle(frame1, (int(x), int(y)), int(radius),
+                       (0, 255, 0), 2)
+            cv2.circle(frame1, center, 5, (0, 255, 0), -1)
+            cv2.circle(frame2, (int(x), int(y)), int(radius),
+                       (0, 255, 0), -1)
+
+            # update the points queue
+            # pts.appendleft(center)
+            if (pts1 is None):
+                pts1 = center
+            cv2.line(frame3, pts1, center, (0, 255, 0), 2)
+            pts1 = center
+    pts_volatile1.appendleft(center)
+
+    # only proceed if at least one contour was found
+    if len(cnts2) > 0:
+        # find the largest contour in the mask, then use
+        # it to compute the minimum enclosing circle and
+        # centroid
+        c = max(cnts2, key=cv2.contourArea)
+        ((x, y), radius) = cv2.minEnclosingCircle(c)
+        M = cv2.moments(c)
+        center2 = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
+        elapsed_time = time.time() - start_time
+        print((x, y))
+        print('2nd value: ' + "%.2f" % elapsed_time)
+
+        # only proceed if the radius meets a minimum size
+        if radius > 10:
+            # draw the circle and centroid on the frame,
+            # then update the list of tracked points
+            cv2.circle(frame1, (int(x), int(y)), int(radius),
+                       (0, 0, 255), 2)
+            cv2.circle(frame1, center2, 5, (125, 125, 0), -1)
+            cv2.circle(frame2, (int(x), int(y)), int(radius),
+                       (0, 0, 255), -1)
+
+            # update the points queue
+            # pts2.appendleft(center2)
+            if (pts2 is None):
+                pts2 = center2
+            cv2.line(frame4, pts2, center2, (125, 125, 0), 2)
+            pts2 = center2
+    pts_volatile2.appendleft(center2)
+
+    # loop over the set of tracked points
+    for i in range(1, len(pts_volatile1)):
+        # if either of the tracked points are None, ignore them
+        if pts_volatile1[i - 1] is None or pts_volatile1[i] is None:
+            continue
+
+        # otherwise, compute the thickness of the line and
+        # draw the connecting lines
+        thickness = int(np.sqrt(256 / float(i + 1)) * 2.5)
+        cv2.line(frame1, pts_volatile1[i - 1], pts_volatile1[i], (0, 255, 0), thickness)
+        cv2.line(frame2, pts_volatile1[i - 1], pts_volatile1[i], (0, 255, 0), thickness)
+
+    # loop over the set of tracked points
+    for i in range(1, len(pts_volatile2)):
+        # if either of the tracked points are None, ignore them
+        if pts_volatile2[i - 1] is None or pts_volatile2[i] is None:
+            continue
+
+        # otherwise, compute the thickness of the line and
+        # draw the connecting lines
+        thickness2 = int(np.sqrt(256 / float(i + 1)) * 2.5)
+        cv2.line(frame1, pts_volatile2[i - 1], pts_volatile2[i], (0, 0, 255), thickness2)
+        cv2.line(frame2, pts_volatile2[i - 1], pts_volatile2[i], (0, 0, 255), thickness2)
+
+    gray = cv2.cvtColor(frame1, cv2.COLOR_BGR2GRAY)
+    # show the frame to our screen
+    cv2.imshow("LiveFeed", frame1)
+    cv2.imshow("MovementTracking", frame2)
+    cv2.imshow("Player1", frame3)
+    cv2.imshow("Player2", frame4)
+    key = cv2.waitKey(1) & 0xFF
+
+    # if the 'q' key is pressed, stop the loop
+    if key == ord("q"):
+        break
+
+# print('pts_volatile size', len(pts_volatile1))
+# print('frame rate:', 1/(time.time()-frame_startTime))
+
+# if we are not using a video file, stop the camera video stream
+if not args.get("video", False):
+    vs.stop()
+
+# otherwise, release the camera
+else:
+    vs.release()
+
+# close all windows
+cv2.destroyAllWindows()
